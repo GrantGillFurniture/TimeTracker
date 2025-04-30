@@ -1,0 +1,258 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Time Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex flex-col items-center min-h-screen p-4">
+  <div class="w-full max-w-md bg-white rounded-lg shadow-md p-6">
+    <h1 class="text-2xl font-bold text-center text-gray-800 mb-4">Time Tracker</h1>
+
+    <!-- Project Name Input -->
+    <div class="mb-4">
+      <input type="text" id="projectName" placeholder="Enter Project Name" class="w-full p-2 mb-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500" value="Default Project">
+    </div>
+
+    <!-- Clock In/Out Slots -->
+    <div class="mb-4 grid grid-cols-2 gap-2">
+      <div class="flex flex-col items-center">
+        <button id="slot1Button" onclick="toggleClock(1)" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Slot 1: Clock In</button>
+        <div id="slot1Status" class="text-sm text-gray-800 mt-1"></div>
+      </div>
+      <div class="flex flex-col items-center">
+        <button id="slot2Button" onclick="toggleClock(2)" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Slot 2: Clock In</button>
+        <div id="slot2Status" class="text-sm text-gray-800 mt-1"></div>
+      </div>
+      <div class="flex flex-col items-center">
+        <button id="slot3Button" onclick="toggleClock(3)" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Slot 3: Clock In</button>
+        <div id="slot3Status" class="text-sm text-gray-800 mt-1"></div>
+      </div>
+      <div class="flex flex-col items-center">
+        <button id="slot4Button" onclick="toggleClock(4)" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Slot 4: Clock In</button>
+        <div id="slot4Status" class="text-sm text-gray-800 mt-1"></div>
+      </div>
+      <div class="flex flex-col items-center">
+        <button id="slot5Button" onclick="toggleClock(5)" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Slot 5: Clock In</button>
+        <div id="slot5Status" class="text-sm text-gray-800 mt-1"></div>
+      </div>
+      <div class="flex flex-col items-center">
+        <button id="slot6Button" onclick="toggleClock(6)" class="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Slot 6: Clock In</button>
+        <div id="slot6Status" class="text-sm text-gray-800 mt-1"></div>
+      </div>
+    </div>
+
+    <!-- Daily Report Preview -->
+    <div class="mb-4">
+      <h2 class="text-lg font-semibold text-gray-800 mb-2">Today's Hours</h2>
+      <div id="report" class="p-2 bg-gray-50 rounded border"></div>
+    </div>
+
+    <!-- Master Reset Button -->
+    <button onclick="masterReset()" class="w-full bg-red-500 text-white p-4 rounded-lg text-lg font-semibold hover:bg-red-600">Master Reset</button>
+  </div>
+
+  <script>
+    let clockState = JSON.parse(localStorage.getItem('clockState') || '{}');
+    let slotPressed = JSON.parse(localStorage.getItem('slotPressed') || '{}');
+    let queuedEntries = JSON.parse(localStorage.getItem('queuedEntries') || '[]');
+    const projectInput = document.getElementById('projectName');
+    const SERVER_URL = 'https://github.com/GrantGillFurniture/TimeTracker.git'; // Replace with your server URL
+
+    // Load project name and update statuses on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      projectInput.value = localStorage.getItem('projectName') || 'Default Project';
+      projectInput.addEventListener('change', () => {
+        localStorage.setItem('projectName', projectInput.value);
+      });
+      updateAllStatuses();
+      loadReport();
+      retryQueuedEntries();
+
+      // Periodically check for connectivity
+      setInterval(retryQueuedEntries, 60000); // Every minute
+      window.addEventListener('online', retryQueuedEntries);
+    });
+
+    function toggleClock(slot) {
+      const project = projectInput.value.trim();
+      if (!project) {
+        alert('Please enter a project name.');
+        return;
+      }
+
+      const key = `slot${slot}`;
+      const now = new Date().toISOString();
+
+      if (clockState[key] && clockState[key].clockIn) {
+        // Clock out
+        const entry = {
+          slot: key,
+          project,
+          clockIn: clockState[key].clockIn,
+          clockOut: now
+        };
+        saveEntry(entry);
+        delete clockState[key];
+      } else {
+        // Clock in
+        clockState[key] = { clockIn: now, project };
+        slotPressed[key] = true; // Mark slot as pressed
+      }
+
+      localStorage.setItem('clockState', JSON.stringify(clockState));
+      localStorage.setItem('slotPressed', JSON.stringify(slotPressed));
+      updateAllStatuses();
+      loadReport();
+    }
+
+    function saveEntry(entry) {
+      const entries = JSON.parse(localStorage.getItem('timeEntries') || '[]');
+      entries.push(entry);
+      localStorage.setItem('timeEntries', JSON.stringify(entries));
+
+      // Try to send to server
+      sendEntryToServer(entry);
+    }
+
+    function sendEntryToServer(entry) {
+      if (!navigator.onLine) {
+        queuedEntries.push(entry);
+        localStorage.setItem('queuedEntries', JSON.stringify(queuedEntries));
+        return;
+      }
+
+      fetch(`${SERVER_URL}/api/entries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry)
+      }).catch(err => {
+        console.error('Failed to send to server:', err);
+        queuedEntries.push(entry);
+        localStorage.setItem('queuedEntries', JSON.stringify(queuedEntries));
+      });
+    }
+
+    function retryQueuedEntries() {
+      if (!navigator.onLine || queuedEntries.length === 0) return;
+
+      const entriesToSend = [...queuedEntries];
+      queuedEntries = [];
+      localStorage.setItem('queuedEntries', JSON.stringify(queuedEntries));
+
+      entriesToSend.forEach(entry => {
+        fetch(`${SERVER_URL}/api/entries`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entry)
+        }).catch(err => {
+          console.error('Failed to send queued entry:', err);
+          queuedEntries.push(entry);
+          localStorage.setItem('queuedEntries', JSON.stringify(queuedEntries));
+        });
+      });
+    }
+
+    function masterReset() {
+      // Clear localStorage
+      localStorage.removeItem('clockState');
+      localStorage.removeItem('timeEntries');
+      localStorage.removeItem('projectName');
+      localStorage.removeItem('slotPressed');
+      localStorage.removeItem('queuedEntries');
+      clockState = {};
+      slotPressed = {};
+      queuedEntries = [];
+      projectInput.value = 'Default Project';
+
+      // Reset UI
+      updateAllStatuses();
+      loadReport();
+
+      // Signal server to reset
+      if (navigator.onLine) {
+        fetch(`${SERVER_URL}/api/reset`, {
+          method: 'POST'
+        }).catch(err => console.error('Failed to reset server:', err));
+      }
+    }
+
+    function updateAllStatuses() {
+      for (let i = 1; i <= 6; i++) {
+        const key = `slot${i}`;
+        const button = document.getElementById(`slot${i}Button`);
+        const status = document.getElementById(`slot${i}Status`);
+
+        if (clockState[key] && clockState[key].clockIn) {
+          button.textContent = `Slot ${i}: Clock Out`;
+          button.className = 'w-full bg-green-500 text-white p-2 rounded hover:bg-green-600';
+          status.textContent = `Clocked in since ${new Date(clockState[key].clockIn).toLocaleTimeString()}`;
+        } else {
+          button.textContent = `Slot ${i}: Clock In`;
+          button.className = slotPressed[key]
+            ? 'w-full bg-yellow-500 text-white p-2 rounded hover:bg-yellow-600'
+            : 'w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600';
+          status.textContent = 'Not clocked in.';
+        }
+      }
+    }
+
+    function loadReport() {
+      const report = document.getElementById('report');
+      const entries = JSON.parse(localStorage.getItem('timeEntries') || '[]');
+      const today = new Date().toISOString().split('T')[0];
+      let totalHours = 0;
+
+      entries.forEach(entry => {
+        if (!entry.clockOut) return;
+        const entryDate = entry.clockIn.split('T')[0];
+        if (entryDate === today && entry.project === projectInput.value) {
+          totalHours += (new Date(entry.clockOut) - new Date(entry.clockIn)) / (1000 * 60 * 60);
+        }
+      });
+
+      report.textContent = `${projectInput.value}: ${totalHours.toFixed(2)} hours`;
+    }
+  </script>
+</body>
+</html>
