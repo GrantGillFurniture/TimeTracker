@@ -97,7 +97,7 @@
     let slotPressed = JSON.parse(localStorage.getItem('slotPressed') || '{}');
     let queuedEntries = JSON.parse(localStorage.getItem('queuedEntries') || '[]');
     const projectInput = document.getElementById('projectName');
-    const SERVER_URL = 'https://github.com/GrantGillFurniture/TimeTracker.git'; // Replace with your server URL
+    const SERVER_URL = 'https://github.io/GrantGillFurniture/TimeTracker/'; // Replace with your server URL
 
     // Load project name and update statuses on page load
     document.addEventListener('DOMContentLoaded', () => {
