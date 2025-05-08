@@ -6,7 +6,7 @@
           return cell !== '' && cell != null;
         }
         function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+        if (gk_isXlsx && gk_xlsxFileLookup[fileSname]) {
             try {
                 var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
                 var firstSheetName = workbook.SheetNames[0];
@@ -97,7 +97,7 @@
     let slotPressed = JSON.parse(localStorage.getItem('slotPressed') || '{}');
     let queuedEntries = JSON.parse(localStorage.getItem('queuedEntries') || '[]');
     const projectInput = document.getElementById('projectName');
-    const SERVER_URL = 'https://github.com/GrantGillFurniture/TimeTracker.git'; // Replace with your server URL
+    const SERVER_URL = 'https://time-tracker-server.glitch.me'; // Replace with your server URL
 
     // Load project name and update statuses on page load
     document.addEventListener('DOMContentLoaded', () => {
